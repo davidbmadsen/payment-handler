@@ -40,10 +40,43 @@ func main() {
 			// skip header
 			continue
 		}
-		handleRow(&customers, record)
+
+		customerId, transaction, err := parseTransaction(record)
+		if err != nil {
+			fmt.Println("Error parsing transaction:", err)
+			continue
+		}
+		handleTransaction(&customers, customerId, transaction)
 	}
 
 	printCustomerAccounts(&customers)
+}
+
+func parseTransaction(record []string) (int, *Transaction, error) {
+	
+	transactionType := record[0]
+	customerId, c_err := strconv.Atoi(record[1])
+	transactionId, t_err := strconv.Atoi(record[2])
+	
+	var amount float64 
+	var amt_err error
+	if transactionType == "deposit" || transactionType == "withdraw" {
+		
+		if(record[3] == "") {
+			return -1, &Transaction{}, fmt.Errorf("amount cant be empty for transaction type %v", transactionType)
+		}
+
+		amount, amt_err = strconv.ParseFloat(record[3], 64)
+	}
+	
+	if c_err != nil || t_err != nil || amt_err != nil {
+		fmt.Println("CustomerId error", c_err)
+		fmt.Println("TransactionId error", t_err)
+		fmt.Println("Amount error", amt_err)
+		return -1, &Transaction{}, fmt.Errorf("one or more fields are not valid")
+	}
+
+	return customerId, &Transaction{transactionId, transactionType, amount}, nil
 }
 
 func openCsvFile(fileName string) (*os.File, error) {
@@ -60,49 +93,51 @@ func openCsvFile(fileName string) (*os.File, error) {
 	return file, err
 }
 
-func handleRow(customers *Customers, row []string) {
+func handleTransaction(customers *Customers, customerId int, transaction *Transaction) {
 
-	paymentType := row[0]
-	customerId, _ := strconv.Atoi(row[1]) // Todo: add error handling
-	transactionId, _ := strconv.Atoi(row[2])
-	amount, _ := strconv.ParseFloat(row[3], 64)
+	account, accountError := getOrCreateAccount(customers, customerId, transaction.txType)
 	
-	account := getOrCreateAccount(customers, customerId, paymentType)
+	if accountError != nil {
+		fmt.Printf("Error getting account for customer %v: %s", customerId, accountError)
+		return
+	}
+
 	var err error
-	switch paymentType {
+
+	switch transaction.txType {
 	case "deposit":
-		err = updateAccountBalance(account, customerId, transactionId, amount, false)
+		err = updateAccountBalance(account, customerId, transaction.id, transaction.amount, false)
 	case "withdraw":
-		err = updateAccountBalance(account, customerId, transactionId, -amount, true)
+		err = updateAccountBalance(account, customerId, transaction.id, transaction.amount, true)
 	case "dispute":
-		err = handleDispute(account, customerId)
+		err = handleDispute(account, transaction.id)
 	case "chargeback":
-		err = handleChargeback(account, customerId)
+		err = handleChargeback(account, transaction.id)
 	case "resolve":
-		err = handleResolve(account, customerId)
+		err = handleResolve(account, transaction.id)
 	default:
-		fmt.Printf("Unknown transaction type %v", paymentType)
+		fmt.Printf("Unknown transaction type %v", transaction.txType)
 	}
 
 	if err != nil {
-		fmt.Printf("Problem processing transaction %v: %s", transactionId, err)
+		fmt.Printf("Problem processing transaction %v: %s", transaction.id, err)
 	}
 }
 
-func getOrCreateAccount(customers *Customers, customerId int, txType string) *Account {
+func getOrCreateAccount(customers *Customers, customerId int, txType string) (*Account, error) {
 
-	_, accountExists := customers.accounts[customerId]
+	account, accountExists := customers.accounts[customerId]
 
 	if !accountExists {
 		// if the account doesn't exist and transaction type isn't "deposit", we cant create a new account
 		if txType != "deposit" {
-			panic("Can't perform transaction on non-existing account")
+			return account, fmt.Errorf("can't perform transaction on non-existing account")
 		}
 		
 		customers.accounts[customerId] = &Account{id: customerId, available: 0, hold: 0, total: 0, frozen: false, transactions: make(map[int]*Transaction)}
 	}
 
-	return customers.accounts[customerId]
+	return customers.accounts[customerId], nil
 }
 
 func updateAccountBalance(account *Account, customerId int, transactionId int, amount float64, isWithdrawal bool) error {
@@ -176,7 +211,8 @@ func handleResolve(account *Account, transactionId int) error {
 }
 
 func printCustomerAccounts(customers *Customers) {
-	fmt.Println("customer, available, hold, total, frozen")
+	
+	fmt.Println("\nResults:\ncustomer, available, hold, total, frozen")
 	for _, account := range customers.accounts {
 		fmt.Printf("%v, %v, %v, %v, %v\n", account.id, account.available, account.hold, account.total, account.frozen)
 	}
