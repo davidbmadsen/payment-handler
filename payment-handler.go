@@ -95,9 +95,14 @@ func openCsvFile(fileName string) (*os.File, error) {
 func handleTransaction(customers *Customers, customerId int, transaction *Transaction) {
 
 	account, accountError := getOrCreateAccount(customers, customerId, transaction.txType)
-	
+
 	if accountError != nil {
 		fmt.Printf("Error getting account for customer %v: %s", customerId, accountError)
+		return
+	}
+
+	if account.frozen && transaction.txType != "resolve" {
+		fmt.Printf("Account %v is frozen", customerId)
 		return
 	}
 
@@ -119,7 +124,7 @@ func handleTransaction(customers *Customers, customerId int, transaction *Transa
 	}
 
 	if err != nil {
-		fmt.Printf("Problem processing transaction %v: %s", transaction.id, err)
+		fmt.Printf("Problem processing transaction %v: %s\n", transaction.id, err)
 	}
 }
 
@@ -159,6 +164,7 @@ func updateAccountBalance(account *Account, customerId int, transactionId int, a
 		txType = "deposit"
 	}
 
+	// add transaction to account
 	account.transactions[transactionId] = &Transaction{id: customerId, txType: txType, amount: amount}
 	return nil
 }
@@ -171,9 +177,7 @@ func handleDispute(account *Account, transactionId int) error {
 		
 	disputeAmount := account.transactions[transactionId].amount
 	if account.available < disputeAmount {
-		// assuming we want to dispute max available funds up to dispute amount
-		account.hold = account.available
-		account.available = 0
+		return fmt.Errorf("not enough funds available to dispute")
 	}
 
 	// move funds from available to hold, account total remains unchanged
@@ -200,6 +204,10 @@ func handleResolve(account *Account, transactionId int) error {
 
 	if account.transactions[transactionId] == nil {
 		return fmt.Errorf("Transaction to resolve not found")
+	}
+
+	if account.hold < account.transactions[transactionId].amount {
+		return fmt.Errorf("not enough funds on hold to resolve transaction %v", transactionId)
 	}
 
 	// move funds back to available and unlock account
