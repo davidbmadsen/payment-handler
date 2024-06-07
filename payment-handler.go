@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Error while reading the file: ", err)
 	}
-	fmt.Println("Loaded CSV file:", fileName)
+	
 	defer file.Close()
 
 	reader := csv.NewReader(file)
@@ -36,8 +36,8 @@ func main() {
 	var customers Customers = Customers{accounts: make(map[int]*Account)}
 
 	for index, record := range records {
+		// skip header
 		if index == 0 {
-			// skip header
 			continue
 		}
 
@@ -46,6 +46,7 @@ func main() {
 			fmt.Println("Error parsing transaction:", err)
 			continue
 		}
+
 		handleTransaction(&customers, customerId, transaction)
 	}
 
@@ -60,6 +61,7 @@ func parseTransaction(record []string) (int, *Transaction, error) {
 	
 	var amount float64 
 	var amt_err error
+
 	if transactionType == "deposit" || transactionType == "withdraw" {
 		
 		if(record[3] == "") {
@@ -70,9 +72,6 @@ func parseTransaction(record []string) (int, *Transaction, error) {
 	}
 	
 	if c_err != nil || t_err != nil || amt_err != nil {
-		fmt.Println("CustomerId error", c_err)
-		fmt.Println("TransactionId error", t_err)
-		fmt.Println("Amount error", amt_err)
 		return -1, &Transaction{}, fmt.Errorf("one or more fields are not valid")
 	}
 
@@ -206,13 +205,13 @@ func handleResolve(account *Account, transactionId int) error {
 	// move funds back to available and unlock account
 	account.frozen = false
 	account.available += account.transactions[transactionId].amount
-	account.hold = 0
+	account.hold -= account.transactions[transactionId].amount
 	return nil
 }
 
 func printCustomerAccounts(customers *Customers) {
 	
-	fmt.Println("\nResults:\ncustomer, available, hold, total, frozen")
+	fmt.Println("\ncustomer, available, hold, total, frozen")
 	for _, account := range customers.accounts {
 		fmt.Printf("%v, %v, %v, %v, %v\n", account.id, account.available, account.hold, account.total, account.frozen)
 	}
