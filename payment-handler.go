@@ -6,16 +6,22 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func main() {
 
-	fileName := os.Args[1]
+	command := os.Args[1]
+	fileName := os.Args[2]
+	
+	if command != "-f" && command != "--file" {
+		log.Fatal("Invalid command. Please use -f or --file")
+	}
 
-	file, err := os.Open(fileName)
+	file, err := openCsvFile(fileName)
 
 	if err != nil {
-		log.Fatal("Error while reading the file", err)
+		log.Fatal("Error while reading the file: ", err)
 	}
 	fmt.Println("Loaded CSV file:", fileName)
 	defer file.Close()
@@ -40,6 +46,20 @@ func main() {
 	printCustomerAccounts(&customers)
 }
 
+func openCsvFile(fileName string) (*os.File, error) {
+	file, err := os.Open(fileName)
+
+	if err != nil {
+		log.Fatal("Error while reading the file", err)
+	}
+
+	if !strings.HasSuffix(fileName, ".csv") { 
+		err = fmt.Errorf("format should be csv")
+	}
+
+	return file, err
+}
+
 func handleRow(customers *Customers, row []string) {
 
 	paymentType := row[0]
@@ -48,20 +68,24 @@ func handleRow(customers *Customers, row []string) {
 	amount, _ := strconv.ParseFloat(row[3], 64)
 	
 	account := getOrCreateAccount(customers, customerId, paymentType)
-
+	var err error
 	switch paymentType {
 	case "deposit":
-		updateAccountBalance(account, customerId, transactionId, amount, false)
+		err = updateAccountBalance(account, customerId, transactionId, amount, false)
 	case "withdraw":
-		updateAccountBalance(account, customerId, transactionId, -amount, true)
+		err = updateAccountBalance(account, customerId, transactionId, -amount, true)
 	case "dispute":
-		handleDispute(account, customerId)
+		err = handleDispute(account, customerId)
 	case "chargeback":
-		handleChargeback(account, customerId)
+		err = handleChargeback(account, customerId)
 	case "resolve":
-		handleResolve(account, customerId)
+		err = handleResolve(account, customerId)
 	default:
 		fmt.Printf("Unknown transaction type %v", paymentType)
+	}
+
+	if err != nil {
+		fmt.Printf("Problem processing transaction %v: %s", transactionId, err)
 	}
 }
 
@@ -74,18 +98,18 @@ func getOrCreateAccount(customers *Customers, customerId int, txType string) *Ac
 		if txType != "deposit" {
 			panic("Can't perform transaction on non-existing account")
 		}
-		fmt.Printf("Creating account for customer %v\n", customerId)
+		
 		customers.accounts[customerId] = &Account{id: customerId, available: 0, hold: 0, total: 0, frozen: false, transactions: make(map[int]*Transaction)}
 	}
 
 	return customers.accounts[customerId]
 }
 
-func updateAccountBalance(account *Account, customerId int, transactionId int, amount float64, isWithdrawal bool) {
+func updateAccountBalance(account *Account, customerId int, transactionId int, amount float64, isWithdrawal bool) error {
 
 	if isWithdrawal {
 		if account.available < amount {
-			panic("Not enough funds")
+			return fmt.Errorf("not enough funds - can't withdraw more than available balance")
 		}
 		account.total -= amount
 		account.available -= amount
@@ -102,12 +126,13 @@ func updateAccountBalance(account *Account, customerId int, transactionId int, a
 	}
 
 	account.transactions[transactionId] = &Transaction{id: customerId, txType: txType, amount: amount}
+	return nil
 }
 
-func handleDispute(account *Account, transactionId int) {
+func handleDispute(account *Account, transactionId int) error {
 	
 	if account.transactions[transactionId] == nil {
-		panic("Transaction to dispute not found")
+		return fmt.Errorf("transaction to dispute not found")
 	}
 		
 	disputeAmount := account.transactions[transactionId].amount
@@ -120,30 +145,34 @@ func handleDispute(account *Account, transactionId int) {
 	// move funds from available to hold, account total remains unchanged
 	account.available -= disputeAmount
 	account.hold += disputeAmount
+
+	return nil
 }
 
-func handleChargeback(account *Account, transactionId int){
+func handleChargeback(account *Account, transactionId int) error {
 
 	if account.transactions[transactionId] == nil {
-		panic("Transaction to charge back not found")
+		return fmt.Errorf("transaction to charge back not found")
 	}
 
 	// freeze account and charge back transaction amount
 	account.frozen = true
 	account.hold -= account.transactions[transactionId].amount
 	account.total -= account.transactions[transactionId].amount
+	return nil
 }
 
-func handleResolve(account *Account, transactionId int) {
+func handleResolve(account *Account, transactionId int) error {
 
 	if account.transactions[transactionId] == nil {
-		panic("Transaction to resolve not found")
+		return fmt.Errorf("Transaction to resolve not found")
 	}
 
 	// move funds back to available and unlock account
 	account.frozen = false
 	account.available += account.transactions[transactionId].amount
 	account.hold = 0
+	return nil
 }
 
 func printCustomerAccounts(customers *Customers) {
